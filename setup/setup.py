@@ -1,4 +1,6 @@
+#!/Users/mcloney/anaconda3/bin/python
 
+import argparse
 import boto3
 from datetime import datetime, timedelta
 import json
@@ -31,20 +33,41 @@ def find_resource_by_tag(client, tag_key, tag_value, return_value, fx, items_key
 
 
 def conflicting_subnet_exists(client, vpc_id, cidr_block):
+    """
+    I determine if there's already a subnet with the same CIDR block in a given VPC.
+    :param client:
+    :param vpc_id:
+    :param cidr_block:
+    :return:
+    """
     subz = client.describe_subnets()
     cidrz = [sub["SubnetId"] for sub in subz["Subnets"] if sub["VpcId"] == vpc_id and sub["CidrBlock"] == cidr_block]
     return cidrz
 
 
 def create_client(profile="default"):
+    """
+
+    :param profile: String - profile from your ~/.aws/credentials file
+    :return:
+    """
     session = boto3.Session(profile_name=profile)
     # Any clients created from this session will use credentials
     # from the [dev] section of ~/.aws/credentials.
+    region_name = session.region_name
     client = session.client('ec2')
-    return client
+    return client, region_name
 
 
 def create_subnet(client, vpc_id, vpc_name, cidr_block="10.0.0.0/28"):
+    """
+    Creates a subnet, duh.
+    :param client:
+    :param vpc_id:
+    :param vpc_name:
+    :param cidr_block:
+    :return:
+    """
     response = client.create_subnet(VpcId=vpc_id, CidrBlock=cidr_block)
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
     subnet_id = response["Subnet"]["SubnetId"]
@@ -54,6 +77,12 @@ def create_subnet(client, vpc_id, vpc_name, cidr_block="10.0.0.0/28"):
 
 
 def create_route_table(client, vpc_id):
+    """
+    Creates a dragon.
+    :param client:
+    :param vpc_id:
+    :return:
+    """
     response = client.create_route_table(VpcId=vpc_id)
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
     route_table_id = response["RouteTable"]["RouteTableId"]
@@ -61,6 +90,14 @@ def create_route_table(client, vpc_id):
 
 
 def create_route(client, route_table_id, gateway_id, dest_cidr_block="0.0.0.0/0"):
+    """
+    Creates a rainbow-colored aligator.
+    :param client:
+    :param route_table_id:
+    :param gateway_id:
+    :param dest_cidr_block:
+    :return:
+    """
     response = client.create_route(RouteTableId=route_table_id, DestinationCidrBlock=dest_cidr_block,
                                    GatewayId=gateway_id)
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
@@ -68,6 +105,13 @@ def create_route(client, route_table_id, gateway_id, dest_cidr_block="0.0.0.0/0"
 
 
 def get_create_vpc(client, str_name, cidr_block="10.0.0.0/28"):
+    """
+    Checks to see if a VPC with a given name exists, if not, creates it.  Returns VPC Id.
+    :param client:
+    :param str_name:
+    :param cidr_block:
+    :return:
+    """
     vpc_id = find_resource_by_tag(client, "Name", str_name, "VpcId", client.describe_vpcs(), 'Vpcs')
     if vpc_id:
         print("VPC {} exists, VpcId: {}".format(str_name, vpc_id))
@@ -84,6 +128,13 @@ def get_create_vpc(client, str_name, cidr_block="10.0.0.0/28"):
 
 
 def check_gateway_attached(client, gateway_id, vpc_id):
+    """
+    Checkes to see if a VPC is attached to an Internet Gateway.
+    :param client:
+    :param gateway_id:
+    :param vpc_id:
+    :return:
+    """
     gateways = client.describe_internet_gateways(InternetGatewayIds=[gateway_id])
 
     if len(gateways["InternetGateways"][0]["Attachments"]):
@@ -96,12 +147,30 @@ def check_gateway_attached(client, gateway_id, vpc_id):
 
 
 def attach_gateway(client, gateway_id, vpc_id):
+    """
+    Attaches a VPC to a gateway.
+    :param client:
+    :param gateway_id:
+    :param vpc_id:
+    :return:
+    """
     response = client.attach_internet_gateway(InternetGatewayId=gateway_id, VpcId=vpc_id)
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
     return response
 
 
 def get_create_authorize_security_group(client, vpc_id, seg_name, lst_ports, ingress_cidr, group_desc):
+    """
+    Checks to see if a security group exists.  Allows ingress from certain ports via TCP.
+    TODO:  Change the static TCP to a variable
+    :param client: EC2 client
+    :param vpc_id: Id of the VPC
+    :param seg_name: Name for the security group
+    :param lst_ports: List of ports, each entry is a dict with keys of p_from and p_to
+    :param ingress_cidr: CIDR block to allow ingress.
+    :param group_desc: Group description
+    :return: None
+    """
     group_setup = False
     ports_already_setup = []
     segs = client.describe_security_groups()
@@ -135,6 +204,11 @@ def get_create_authorize_security_group(client, vpc_id, seg_name, lst_ports, ing
 
 
 def get_ami(region):
+    """
+    Returns the id of the AMI to use based on what region user is in.
+    :param region: ["us-west-2"|"eu-west-1"|"us-east-1"]
+    :return: String - id of AMI
+    """
     if region == "us-west-2":
         ami = "ami-f8fd5998"
     elif region == "eu-west-1":
@@ -149,7 +223,9 @@ def get_ami(region):
 
 def create_ssh_key(client, vpc_name, delete_first=False):
     """
-
+    Creates and saves an SSH key, optionally deleting it first.
+    Deleting first is useful if you've created a key in another account or region
+    and it's giving you lip.
     :param client:
     :param vpc_name:
     :param delete_first: Boolean - whether to try to delete the key first and recreate it
@@ -193,6 +269,13 @@ def create_ssh_key(client, vpc_name, delete_first=False):
 
 
 def get_instances_by_name(client, instance_name):
+    """
+    Returns a list of instances with a given name.  Useful if you've tried and failed many times
+    as I have.
+    :param client: EC2 client
+    :param instance_name: Name (Tag) of the instance
+    :return:
+    """
     response = client.describe_instances()
     instances = []
     # response["Reservations"][0]["Instances"][0]["Tags"]
@@ -206,40 +289,6 @@ def get_instances_by_name(client, instance_name):
         print(str(e))
 
     return instances
-
-
-def destroy_enviornment(client, vpc_name, region="us-east-1"):
-    #     aws ec2 disassociate-address --association-id
-    #     aws ec2 release-address --allocation-id
-    #     aws ec2 terminate-instances --instance-ids
-    #     aws ec2 wait instance-terminated --instance-ids
-    #     aws ec2 delete-security-group --group-id
-    #     aws ec2 disassociate-route-table --association-id
-    #     aws ec2 delete-route-table --route-table-id
-    #     aws ec2 detach-internet-gateway --internet-gateway-id  --vpc-id
-    #     aws ec2 delete-internet-gateway --internet-gateway-id
-    #     aws ec2 delete-subnet --subnet-id
-    #     aws ec2 delete-vpc --vpc-id
-    #     echo If you want to delete the key-pair, plea
-
-    instance_name = vpc_name + "-gpu-machine"
-    print("Checking for instances named " + instance_name + "...")
-    # change this to
-    # lst_instances = find_resource_by_tag(client, "Name", instance_name, "InstanceId", client.describe_instances(), "Instances")
-    # ec2_client, "Name", vpc_name + "-gateway", "InternetGatewayId", ec2_client.describe_internet_gateways(), 'InternetGateways'
-    lst_instances = get_instances_by_name(client, instance_name)
-
-    print("Found a total of {} instances named {}".format(len(lst_instances), instance_name))
-
-    if instances:
-        response = client.terminate_instances(InstanceIds=lst_instances)
-        print(response)
-    # check to make sure instance(s) are terminated
-
-    associations = find_resource_by_tag(client, "Name", vpc_name + "-route-table", "Associations",
-                                        client.describe_route_tables(), "RouteTables")
-    for a in associations:
-        client.disassociate_route_table(AssociationId=a["RouteTableAssociationId"])
 
 
 def check_attach_internet_gateway(client, vpc_id, vpc_name):
@@ -295,10 +344,10 @@ def assign_elastic_ip(client, instance_id, allocation_id):
 
 
 def main(my_profile="default", vpc_name="fast-ai", cidr_block="10.0.0.0/28", instance_type="p2.xlarge",
-         region="us-east-1", use_spot=False):
+         use_spot=False, ingress_cidr = "0.0.0.0/0", delete_ssh_key=False):
+
     retvals = {}
-    ingress_cidr = "0.0.0.0/0"
-    ec2_client = create_client(my_profile)
+    ec2_client, region_name = create_client(my_profile)
     # vpc_id = find_resource_by_tag(ec2_client, "Name", vpc_name, "VpcId", ec2_client.describe_vpcs(), 'Vpcs')
     # if vpc_id is None:
     vpc_id = get_create_vpc(ec2_client, vpc_name)
@@ -352,12 +401,12 @@ def main(my_profile="default", vpc_name="fast-ai", cidr_block="10.0.0.0/28", ins
     assert len(security_group_id) > 0
     retvals["security_group_id"] = security_group_id
 
-    image_id = get_ami(region)
+    image_id = get_ami(region_name)
     retvals["image_id"] = image_id
 
-    key_name = create_ssh_key(client, vpc_name, delete_first=False)
+    key_name = create_ssh_key(ec2_client, vpc_name, delete_first=delete_ssh_key)
 
-    response = client.run_instances(ImageId=image_id, InstanceType=instance_type
+    response = ec2_client.run_instances(ImageId=image_id, InstanceType=instance_type
                                     , KeyName=key_name, MaxCount=1, MinCount=1, SubnetId=subnet_id
                                     , SecurityGroupIds=[security_group_id]
                                     , BlockDeviceMappings=[{"DeviceName": "/dev/sda1", "Ebs":
@@ -367,8 +416,8 @@ def main(my_profile="default", vpc_name="fast-ai", cidr_block="10.0.0.0/28", ins
     print("Instance {} has started successfully".format(instance_id))
     retvals["instance_id"] = instance_id
 
-    client.create_tags(Resources=[instance_id], Tags=[{"Key": "Name", "Value": vpc_name + "-gpu-machine"}])
-    response = client.allocate_address(Domain='vpc')
+    ec2_client.create_tags(Resources=[instance_id], Tags=[{"Key": "Name", "Value": vpc_name + "-gpu-machine"}])
+    response = ec2_client.allocate_address(Domain='vpc')
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
     allocation_id = response["AllocationId"]
     public_ip = response["PublicIp"]
@@ -377,6 +426,26 @@ def main(my_profile="default", vpc_name="fast-ai", cidr_block="10.0.0.0/28", ins
     retvals["allocation_id"] = allocation_id
     retvals["public_ip"] = public_ip
 
-    assign_elastic_ip(client, instance_id, allocation_id)
-
+    assign_elastic_ip(ec2_client, instance_id, allocation_id)
+    print("Setup complete")
+    print(retvals)
     return retvals
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cents-over-spot-price", default=2)
+    parser.add_argument("--my-profile", default="default")
+    parser.add_argument("--vpc-name", default="fast-ai")
+    parser.add_argument("--cidr-block", default="10.0.0.0/28")
+    parser.add_argument("--instance-type", default="p2.xlarge")
+    parser.add_argument("--ingress-cidr", default="0.0.0.0/0")
+    parser.add_argument("--use-spot", default=False)
+    parser.add_argument("--delete-ssh-key", default=False)
+    args = parser.parse_args()
+    # print(args)
+    # do some verification here, like make sure strings are in the right format, etc.
+
+    main(my_profile=args.my_profile, vpc_name=args.vpc_name, cidr_block=args.cidr_block
+         , instance_type="p2.xlarge", use_spot=args.use_spot
+         , ingress_cidr="0.0.0.0/0", delete_ssh_key=args.delete_ssh_key)
